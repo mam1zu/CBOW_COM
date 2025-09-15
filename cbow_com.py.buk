@@ -26,7 +26,7 @@ class CBOWNet(nn.Module):
             wf = np.power(self.weights, 0.75)
             wf /= np.sum(wf)
             self.weights = torch.FloatTensor(wf)
-
+        
     def forward(self, context_words, centre_word):
         #コンテキストベクトルをあつめて平均を取り、output_embへの入力を得る
         #ここでアテンション重みをかけてあげればACBOWとなる...はず
@@ -37,12 +37,12 @@ class CBOWNet(nn.Module):
         for idx in context_words:
             comatrix_weight.append(glove_weight_function(self.co_matrix[centre_word][idx]))
         comatrix_weight = torch.tensor(comatrix_weight)
-        comatrix_weight_sum = torch.sum(comatrix_weight)
+        comatrix_weight_avg = torch.mean(comatrix_weight)
         comatrix_weight = comatrix_weight.view(-1, 1)
         context_embedding = torch.matmul(comatrix_weight.T, context_embedding)
-        context_embedding = torch.divide(context_embedding, comatrix_weight_sum)
+        context_embedding = torch.divide(context_embedding, comatrix_weight_avg)
 
-
+        
         #context_embedding = torch.mean(context_embedding, dim=0)
         #次に、W_out, すなわちoutput_embの重みと内積を取る
 
@@ -57,7 +57,7 @@ class CBOWNet(nn.Module):
         #print("t_vec  : " + str(t))
         #print("loss: " + str(loss))
         return loss
-
+    
 
 #sentence = "You say goodbye and I say hello."
 sentence = "Japan is an island country in East Asia. Located in the Pacific Ocean oof the northeast coast of the Asian mainland, it is borderd on the west by the Sea of Japan and extends from the Sea of Okhotsk in the north to the East China Sea in the south. The Japanese achipelago consists of four major islands, Hokkaido, Honshu, Shikoku, and Kyushu, and thousands of smaller islands, covering 377,975 square kilometers. Japan has a population of over 123 million as of 2025, making it the eleventh-most populous country. The capital of Japan and its largest city is Tokyo. the Greater Tokyo Area is the largest metropolitan area in the world."
@@ -65,20 +65,20 @@ num_negative_samples = 3
 corpus, word_to_id, id_to_word = preprocess(sentence)
 
 model = CBOWNet(len(word_to_id), emb_dim=5, corpus=corpus)
-optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
-
+optimizer = optim.SGD(model.parameters(), lr=0.025, momentum=0.9, weight_decay=5e-4)
+#optimizer = optim.SGD(model.parameters(), lr=0.025)
 contexts, target = create_contexts_target(corpus, window_size=1)
 batch_size = corpus.shape[0]
 
 loss = model(contexts[0], target[0])
 
-for epoch in range(5):
+for epoch in range(20):
     loss = 0
     model.train()
     optimizer.zero_grad()
     for i in range(len(contexts)):
         loss += model(contexts[i], target[i])
-
+    
     loss.backward()
     print("epoch :" + str(epoch))
     print("whole_loss: " + str(loss))
@@ -93,4 +93,3 @@ with torch.no_grad():
 
     print(model.input_emb.weight)
     print(model.output_emb.weight)
-
