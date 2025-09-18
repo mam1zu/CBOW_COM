@@ -42,7 +42,33 @@ HASHREC **inithashtable(void) {
 }
 
 int get_word(char *word, FILE *fin) {
-	int i = 0;
+    int i = 0, ch;
+    for ( ; ; ) {
+        ch = fgetc(fin);
+        if (ch == '\r') continue;
+        if (i == 0 && ((ch == '\n') || (ch == EOF))) {
+            word[i] = 0;
+            return 1;
+        }
+        if (i == 0 && ((ch == ' ') || (ch == '\t'))) continue; // skip leading space
+        if ((ch == EOF) || (ch == ' ') || (ch == '\t') || (ch == '\n')) {
+            if (ch == '\n') ungetc(ch, fin); // return the newline next time as document ender
+            break;
+        }
+        if (i < MAX_STRING_LENGTH - 1)
+          word[i++] = ch; // don't allow words to exceed MAX_STRING_LENGTH
+    }
+    word[i] = 0; //null terminate
+    if (i == MAX_STRING_LENGTH - 1 && (word[i-1] & 0x80) == 0x80) {
+        if ((word[i-1] & 0xC0) == 0xC0) {
+            word[i-1] = '\0';
+        } else if (i > 2 && (word[i-2] & 0xE0) == 0xE0) {
+            word[i-2] = '\0';
+        } else if (i > 3 && (word[i-3] & 0xF8) == 0xF0) {
+            word[i-3] = '\0';
+        }
+    }
+    return 0;
 }
 
 void free_table(HASHREC **ht) {

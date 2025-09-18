@@ -2,11 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <locale.h>
 #include "common.h"
 
-#define SRC_FILE_PATH "/home/kouki-takashima/wiki-cleaned.txt"
-#define DST_FILE_PATH "/home/kouki-takashima/wiki-cleaned.100000.txt"
-#define VCB_FILE_PATH "/home/kouki-takashima/wiki-cleaned.100000.vocab"
+#define SRC_FILE_PATH "/tf/paper/wikidata/wiki-cleaned.txt"
+#define DST_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.100000.txt"
+#define VCB_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.100000.vocab"
 #define UNK_TOKEN "<UNK>"
 
 void hashinsert(HASHREC **ht, char *w) {
@@ -41,12 +42,14 @@ void hashinsert(HASHREC **ht, char *w) {
 int main(void) {
 	
 	FILE *src_fp, *dst_fp, *vcb_fp;
-	char ch[200];
+	char ch[MAX_STRING_LENGTH];
 	HASHREC **vocab_hash = inithashtable();
 	HASHREC *htmp;
 	long long i = 0;
 	unsigned short flag = 0;
 	time_t start_time, end_time;
+
+	setlocale(LC_ALL, "");
 
 	src_fp = fopen(SRC_FILE_PATH, "r");
 
@@ -71,11 +74,11 @@ int main(void) {
 
 	start_time = time(NULL);
 	fprintf(stderr, "Phase 1: Generate Hash Table Using Vocabulary File. UNIX TIME: %ld\n", start_time);
-	fprintf(stderr, "Scanning Vocabulary File: %lld words.");
+	fprintf(stderr, "Scanning Vocabulary File: %lld words.", i);
 	while( !feof(vcb_fp) ) {
-		int nl = get_word(std, src_fp);
+		int nl = get_word(ch, vcb_fp);
 		if(nl) continue;
-		if(scmp(str, "<UNK>") == 0) {
+		if(scmp(ch, "<UNK>") == 0) {
 			fprintf(stderr, "ERROR. <UNK> token detected. please remove.\n");
 			free_table(vocab_hash);
 			fclose(src_fp);
@@ -83,19 +86,23 @@ int main(void) {
 			fclose(dst_fp);
 			return 4;
 		}
-		hashinsert(vocab_hash, str);
+		hashinsert(vocab_hash, ch);
 		if(((++i) % 10000) == 0) fprintf(stderr, "\r\033[0KScanning Vocabulary File: %lld words.", i);
 	}
 
 
 	fprintf(stderr, "\r\033[0KScanning Vocabulary File: %lld words\n", i);
 	fprintf(stderr, "Phase 1 Completed.\n");
-	fprintf(stderr, "Phase 2: Replacing unlisted tokens with <UNK> token.\n");
+	fprintf(stderr, "Phase 2: Removing unlisted words from corpus.\n");
 
 	i = 0;
-	while(fscanf(src_fp, "%s", ch) != EOF) {
+	fprintf(stderr, "Processed %lld tokens.", i);
+	while( !feof(src_fp) ) {
+		int nl = get_word(ch, src_fp);
+		if(nl) continue;
+		htmp = vocab_hash[HASHFN(ch, TSIZE, SEED)];
+		if(htmp == NULL) continue;
 		while(1) {
-			htmp = vocab_hash[HASHFN(ch, TSIZE, SEED)];
 			if(scmp(htmp->word, ch) == 0) {
 				++flag;
 				break;
@@ -108,8 +115,6 @@ int main(void) {
 		}
 		if(flag)
 			fprintf(dst_fp, "%s ", ch);
-		else
-			fprintf(dst_fp, "%s ", UNK_TOKEN);
 		
 		if(((++i) % 100000) == 0) fprintf(stderr, "\r\033[0KProcessed %lld tokens.", i);
 	}
@@ -120,6 +125,7 @@ int main(void) {
 	fprintf(stderr, "Duration: %ld[s]\n", end_time - start_time);
 	free_table(vocab_hash);
 	fclose(src_fp);
+	fclose(vcb_fp);
 	fclose(dst_fp);
 
 }

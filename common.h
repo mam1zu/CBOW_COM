@@ -30,6 +30,7 @@ typedef struct hashrec {
 int scmp( char *s1, char *s2 );
 unsigned int bitwisehash(char *word, int tsize, unsigned int seed);
 HASHREC **inithashtable(void);
+int get_word(char *word, FILE *fin);
 void free_table(HASHREC **ht);
 void free_fid(FILE **fid, const int num);
 

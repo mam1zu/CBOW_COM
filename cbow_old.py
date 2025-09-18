@@ -60,7 +60,7 @@ batch_size = corpus.shape[0]
 
 loss = model(contexts[0], target[0])
 
-for epoch in range(20):
+for epoch in range(5):
     loss = 0
     model.train()
     optimizer.zero_grad()

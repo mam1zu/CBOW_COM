@@ -27,6 +27,14 @@ class CBOWNet(nn.Module):
             wf /= np.sum(wf)
             self.weights = torch.FloatTensor(wf)
 
+        #CUDAが使用可能ならば、ルックアップテーブル等をGPUメモリ上に転送する
+        #共起行列についてはサイズが20GB程度と予想されるため、リアルタイム読み込みを行いたい
+
+        if device is "cuda":
+            self.input_emb = self.input_emb.to(device)
+            self.output_emb = self.
+
+
     def forward(self, context_words, centre_word):
         #コンテキストベクトルをあつめて平均を取り、output_embへの入力を得る
         #ここでアテンション重みをかけてあげればACBOWとなる...はず
