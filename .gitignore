@@ -1,2 +1,6 @@
 __pycache__
 .gitignore
+models
+dataset
+model_*
+wiki-cleaned*

@@ -33,27 +33,40 @@ class CBOWNet(nn.Module):
             wf /= np.sum(wf)
             self.weights = torch.FloatTensor(wf)
         
-    def forward(self, context_ids, centre_id):
-        #コンテキストベクトルをあつめて平均を取り、output_embへの入力を得る
-        #ここでアテンション重みをかけてあげればACBOWとなる...はず
+    def forward(self, context_ids, centre_id, neg_ids):
 
-        context_embedding = self.input_emb(context_ids)
+        #1. 周辺単語のベクトルを取得
+        context_embedding = self.input_emb(context_ids) # shape: (batch_size, window_size*2, emb_dim)
         
-        context_embedding = torch.mean(context_embedding, dim=1) #dim0: バッチ方向 dim1: 何？
-        #次に、W_out, すなわちoutput_embの重みと内積を取る
+        #2. ウィンドウ内の周辺単語のベクトルの平均をとる、これが中間層への入力となる
+        context_embedding = torch.mean(context_embedding, dim=1) # shape: (batch_size, emb_dim)
+        
+        #3. 出力層側での正例の単語ベクトルを取得
+        positive_sample = self.output_emb(centre_id) # shape: (batch_size, emb_dim)
+        
+        #4. 正例に関するネットワークのそのままの出力(=スコア)を計算
+        positive_score = torch.sum(context_embedding * positive_sample, dim=1) # shape: (batch_size)
+        
+        #5. 正例スコアをシグモイド関数(-1, 1)に通した後logで尤度化(-inf, 0)
+        positive_loss = F.logsigmoid(positive_score) #shape: (batch_size)
 
-        output = torch.matmul(context_embedding, self.output_emb.weight.T)
+        #6. 負例単語に関する出力側の単語ベクトルを取得
+        negative_embedding = self.output_emb(neg_ids) # shape: (batch_size, num_negative_samples, emb_dim)
+        
+        #7. 正例についてのコンテキストベクトルのサイズを、負例データとの行列積が可能になるように調整
+        context_embedding = context_embedding.unsqueeze(1) # shape: (batch_size, 1, emb_dim)
 
-        #t = F.one_hot(torch.tensor(centre_id), num_classes=self.vocab_size)
-        #t = t.view(1, self.vocab_size)
+        #8. 負例に関するネットワークのそのままの出力(=スコア)を計算
+        negative_score = torch.bmm(context_embedding, negative_embedding.transpose(1, 2)).squeeze(1) # shape: (batch_size, num_negatice_samples)
+        
+        #9. 負例スコアをシグモイド関数(-1, 1)に通した後logで尤度化(-inf, 0)
+        negative_loss = F.logsigmoid(-negative_score).sum(dim=1) #shape: (batch_size)
 
-        #loss = F.cross_entropy(output, t.float())
-        loss = F.cross_entropy(output, centre_id)
-        #print("loss: " + str(loss))
-        return loss
+        #10. 正例での誤差と負例での誤差を足し、最小化問題のためマイナス符号をつけ, バッチ方向で平均を取りスカラに変換、戻り値とする。
+        return -(positive_loss + negative_loss).mean() #バッチ方向で平均
     
 
-num_negative_samples = 3
+num_negative_samples = 10
 
 emb_dim = 300
 model = CBOWNet(100001, emb_dim=emb_dim)
@@ -61,6 +74,7 @@ model = CBOWNet(100001, emb_dim=emb_dim)
 #model.load_state_dict(torch.load("./model_2.pth"))
 model = model.to(device)
 optimizer = optim.SGD(model.parameters(), lr=0.025, momentum=0.9, weight_decay=5e-4)
+weights = torch.from_numpy(np.load("./wiki-cleaned.nostopword.100000.negdist.npy")).to(device, dtype=torch.float) #negative sampling weights
 #optimizer = optim.SGD(model.parameters(), lr=0.025)
 
 # with tqdm(range(epoch)) as pbar_epoch:
@@ -75,7 +89,7 @@ optimizer = optim.SGD(model.parameters(), lr=0.025, momentum=0.9, weight_decay=5
 #                 optimizer.step()
 
 for epoch in tqdm(range(1)):
-    dataset_idx = 3
+    dataset_idx = 0
     loss_all = 0
     if dataset_idx == -1:
         break
@@ -87,15 +101,22 @@ for epoch in tqdm(range(1)):
         custom_dataset= CustomDataset(data, labels)
         custom_dataset.data = torch.from_numpy(custom_dataset.data).to(device)
         custom_dataset.labels = torch.from_numpy(custom_dataset.labels).to(device)
-        data_loader = DataLoader(dataset=custom_dataset, batch_size=4096, shuffle=True)
+        data_loader = DataLoader(dataset=custom_dataset, batch_size=8192, shuffle=True)
         for batch in tqdm(data_loader):
+            context_ids = batch['data'].to(device, dtype=torch.long)
+            centre_ids = batch['labels'].to(device, dtype=torch.long)
+
+            batch_size = centre_ids.shape[0]
+            neg_ids = torch.multinomial(weights, batch_size * num_negative_samples, replacement=True)
+            neg_ids = neg_ids.view(batch_size, num_negative_samples) # shape: (batch_size, num_negative_samples)
+
             optimizer.zero_grad()
-            loss = model(batch['data'].to(torch.int64), batch['labels'].to(torch.int64))
+            loss = model(context_ids, centre_ids, neg_ids)
             loss.backward()
             optimizer.step()
             loss_all += loss.item()
 
-        torch.save(model.state_dict(), f"./models/dim_{emb_dim}/model_{dataset_idx}.pth")
+        torch.save(model.state_dict(), f"./models/dim_{emb_dim}/model_negs_{dataset_idx}.pth")
         if dataset_idx == 20:
             break
         dataset_idx += 1

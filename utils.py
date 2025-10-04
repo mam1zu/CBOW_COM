@@ -78,4 +78,11 @@ def generate_co_occurrence_matrix(corpus, vocab_size, window_size=1):
             co_matrix[target_word_id][context_word_id] += 1
 
     return co_matrix
- 
+
+
+def _init_normal(vocab_size, emb_dim):
+    init_weights = torch.from_numpy(np.random.normal(size=(vocab_size, emb_dim),
+        loc = 0.0, scale = 0.1).astype(np.float32))
+
+    return init_weights
+

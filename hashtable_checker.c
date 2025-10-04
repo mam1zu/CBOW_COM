@@ -4,11 +4,27 @@
 #include <time.h>
 #include <locale.h>
 #include "common.h"
+#include "stdbool.h"
 
 #define SRC_FILE_PATH "/tf/paper/wikidata/wiki-cleaned.txt"
 #define DST_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.100000.txt.test"
-#define VCB_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.100000.vocab"
+#define VCB_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.nostopword.100000.vocab"
 #define UNK_TOKEN "<UNK>"
+
+int word_counter = 1;
+char **id_to_word;
+
+HASHREC *hashsearch(HASHREC **ht, char *w) {
+	HASHREC *htmp, *hprv;
+	unsigned int hval = HASHFN(w, TSIZE, SEED);
+	for(hprv = NULL, htmp=ht[hval]; htmp != NULL && scmp(htmp->word, w) != 0; hprv = htmp, htmp= htmp->next);
+	if(htmp != NULL && hprv != NULL) {
+		hprv->next = htmp->next;
+		htmp->next = ht[hval];
+		ht[hval] = htmp;
+	}
+	return htmp;
+}
 
 void hashinsert(HASHREC **ht, char *w) {
     HASHREC     *htmp, *hprv;
@@ -19,7 +35,7 @@ void hashinsert(HASHREC **ht, char *w) {
         htmp = (HASHREC *) malloc( sizeof(HASHREC) );
         htmp->word = (char *) malloc( strlen(w) + 1 );
         strcpy(htmp->word, w);
-        htmp->num = 1;
+        htmp->num = word_counter;
         htmp->next = NULL;
         if ( hprv==NULL )
             ht[hval] = htmp;
@@ -41,38 +57,27 @@ void hashinsert(HASHREC **ht, char *w) {
 
 int main(void) {
 	
-	FILE *src_fp, *dst_fp, *vcb_fp;
+	FILE *vcb_fp;
 	char ch[MAX_STRING_LENGTH];
 	HASHREC **vocab_hash = inithashtable();
 	HASHREC *htmp;
-	long long i = 0;
+	long long i = 0, hoge = 0;
+	int mode = 0, id = 0;
 	long long counter = 0;
 	unsigned short flag = 0;
 	time_t start_time, end_time;
 
-	setlocale(LC_ALL, "");
-
-	src_fp = fopen(SRC_FILE_PATH, "r");
-
-	if(src_fp == NULL) {
-		fprintf(stderr, "Source File %s does not found\n", SRC_FILE_PATH);
-		return 1;
-	}
-
 	vcb_fp = fopen(VCB_FILE_PATH, "r");
 
 	if(vcb_fp == NULL) {
-		fprintf(stderr, "Vocabulary File %s does not found\n", VCB_FILE_PATH);
+		fprintf(stderr, "Vocabulary File %s not found\n", VCB_FILE_PATH);
 		return 2;
 	}
 
-	dst_fp = fopen(DST_FILE_PATH, "w");
-
-	if(dst_fp == NULL) {
-		fprintf(stderr, "Destination File %s can't be opened\n", DST_FILE_PATH);
-		return 3;
-	}
-
+	id_to_word = (char **)malloc(sizeof(char *) * 100001);
+	for(hoge = 0; hoge < 100001; hoge++)
+		id_to_word[hoge] = (char *)malloc(sizeof(char) * 16);
+	
 	start_time = time(NULL);
 	fprintf(stderr, "Phase 1: Generate Hash Table Using Vocabulary File. UNIX TIME: %ld\n", start_time);
 	fprintf(stderr, "Scanning Vocabulary File: %lld words.", i);
@@ -82,57 +87,64 @@ int main(void) {
 		if(scmp(ch, "<UNK>") == 0) {
 			fprintf(stderr, "ERROR. <UNK> token detected. please remove.\n");
 			free_table(vocab_hash);
-			fclose(src_fp);
 			fclose(vcb_fp);
-			fclose(dst_fp);
 			return 4;
 		}
 		hashinsert(vocab_hash, ch);
+		strcpy(id_to_word[word_counter], ch);
+		fprintf(stderr, "%d : %s\n", word_counter, id_to_word[word_counter]);
+		word_counter++;
 		if(((++i) % 10000) == 0) fprintf(stderr, "\r\033[0KScanning Vocabulary File: %lld words.", i);
 	}
 
 
 	fprintf(stderr, "\r\033[0KScanning Vocabulary File: %lld words\n", i);
 	fprintf(stderr, "Phase 1 Completed.\n");
-	fprintf(stderr, "Phase 2: Removing unlisted words from corpus.\n");
 
-	i = 0;
-	fprintf(stderr, "Processed %lld tokens.", i);
-	while( !feof(src_fp) ) {
-		int nl = get_word(ch, src_fp);
-		if(nl) {
-			fprintf(dst_fp, "\n");
+	while(true) {
+		if(mode == 0) {
+			fprintf(stderr, "Enter mode. 1: word_to_id, 2: id_to_word");
+			fscanf(stdin, "%d", &mode);
+			if(mode != 1 && mode != 2) {
+				mode = 0;
+			}
 			continue;
 		}
-		htmp = vocab_hash[HASHFN(ch, TSIZE, SEED)];
-		if(htmp == NULL) continue;
-		while(1) {
-			if(scmp(htmp->word, ch) == 0) {
-				++flag;
+		if(mode == 1) {
+			fprintf(stderr, "input words to check id: ");
+                	fscanf(stdin, "%s", ch);
+                	if(strcmp(ch, "NANIWOSURUNOKA") == 0) {
+                        	fprintf(stderr, "BYE\n");
+                   		break;
+                	}
+
+                	htmp = hashsearch(vocab_hash, ch);
+                	if(htmp != NULL)
+                        	fprintf(stderr, "%lld\n", htmp->num);
+                	else
+                        	fprintf(stderr, "NULL\n");
+		}
+
+		if(mode == 2) {
+			fprintf(stderr, "input id to check word: ");
+			fscanf(stdin, "%s", ch);
+			id = atoi(ch);
+			if(id == 2231081) {
+				fprintf(stderr, "BYE\n");
 				break;
 			}
-			else if(htmp->next != NULL) {
-				htmp = htmp->next;
-				continue;
+			if(0 <= id && id <= 100001) {
+				fprintf(stderr, "%s\n", id_to_word[id]);
 			}
-			else break;
+			else {
+				fprintf(stderr, "NOPE\n");
+			}
 		}
-
-		if(flag) {
-			--flag;;
-			fprintf(dst_fp, "%s ", ch);
-		}
-		
-		if(((++i) % 100000) == 0) fprintf(stderr, "\r\033[0KProcessed %lld tokens.", i);
 	}
-	fprintf(stderr, "\r\033[0KProcessed %lld tokens.\n", i);
+	
 
-	end_time = time(NULL);
-	fprintf(stderr, "Phase 2 Completed. UNIX TIME: %ld\n", end_time);
-	fprintf(stderr, "Duration: %ld[s]\n", end_time - start_time);
 	free_table(vocab_hash);
-	fclose(src_fp);
+	free(id_to_word);
 	fclose(vcb_fp);
-	fclose(dst_fp);
 
 }

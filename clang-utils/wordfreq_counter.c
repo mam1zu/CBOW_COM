@@ -5,9 +5,9 @@
 #include <locale.h>
 #include "common.h"
 
-#define SRC_FILE_PATH "/tf/paper/wikidata/wiki-cleaned.txt"
-#define DST_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.100000.txt.test"
-#define VCB_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.100000.vocab"
+#define SRC_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.nostopword.txt"
+#define DST_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.nostopword.100000.txt"
+#define VCB_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.nostopword.100000.vocab"
 #define UNK_TOKEN "<UNK>"
 
 void hashinsert(HASHREC **ht, char *w) {
