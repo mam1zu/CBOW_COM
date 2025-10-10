@@ -14,8 +14,8 @@
 
 #define SRC_FILE_PATH ""
 #define VCB_FILE_PATH ""
+#define VCBC_FILE_PATH
 #define DST_FILE_PATH ""
-#define STOP_WORD_NUM 100
 #define VOCAB_SIZE 100000
 
 HASHREC *hashsearch(HASHREC **ht, char *w) {

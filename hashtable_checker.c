@@ -8,8 +8,9 @@
 
 #define SRC_FILE_PATH "/tf/paper/wikidata/wiki-cleaned.txt"
 #define DST_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.100000.txt.test"
-#define VCB_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.nostopword.100000.vocab"
+#define VCB_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.nostopword.400000.vocab"
 #define UNK_TOKEN "<UNK>"
+#define VOCAB_SIZE 400000
 
 int word_counter = 1;
 char **id_to_word;
@@ -74,8 +75,8 @@ int main(void) {
 		return 2;
 	}
 
-	id_to_word = (char **)malloc(sizeof(char *) * 100001);
-	for(hoge = 0; hoge < 100001; hoge++)
+	id_to_word = (char **)malloc(sizeof(char *) * VOCAB_SIZE);
+	for(hoge = 0; hoge < VOCAB_SIZE; hoge++)
 		id_to_word[hoge] = (char *)malloc(sizeof(char) * 16);
 	
 	start_time = time(NULL);

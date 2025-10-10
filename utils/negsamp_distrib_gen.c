@@ -7,10 +7,10 @@
 
 #define LIMIT 100000
 #define ALPHA 0.75
-#define VCBC_FILE_PATH "/tf/paper/cbow-com/clang-utils/wiki-cleaned.nostopword.100000.vocabc"
-#define DST_FILE_PATH "/tf/paper/cbow-com/clang-utils/wiki-cleaned.nostopword.100000.negdist"
-#define MODE 0 //MODE 0: 単語, 確率をテキスト形式で出力, 1: 配列長100000の確率をnumpy形式で出力
-
+#define VCBC_FILE_PATH "/tf/paper/cbow-com/utils/wiki-cleaned.nostopword.100000.vocabc"
+#define DST_FILE_PATH "/tf/paper/cbow-com/utils/wiki-cleaned.nostopword.100000.negdist"
+#define MODE 1 //MODE 0: 単語, 確率をテキスト形式で出力, 1: 配列長100000の確率をnumpy形式で出力
+#define MODE_ALPHA 1 //MODE_ALPHA 0: ALPHA乗することなくそのまま出力, 1: 値をALPHA乗して出力
 
 HASHREC *hashsearch(HASHREC **ht, char *w) {
         HASHREC *htmp, *hprv;
@@ -170,12 +170,16 @@ int main(int argc, char *argv[]) {
                 tmp += (float)counter;
 		fprintf(stderr, "%d ", count[i]);
         }
-
-	tmp = pow(tmp, ALPHA);
+	if(MODE_ALPHA) {
+		tmp = pow(tmp, ALPHA);
+	}
 
         if(mode == 0) {
                 for(i = 0; i < LIMIT; i++) {
-			distrib = pow((float)count[i], ALPHA) / tmp;
+			if(MODE_ALPHA)
+				distrib = pow((float)count[i], ALPHA) / tmp;
+			else
+				distrib = (float)count[i] / tmp;
                         fprintf(dst_fp, "%s %f\n", words[i], distrib);
                 }
         }
@@ -185,7 +189,10 @@ int main(int argc, char *argv[]) {
                 write_npy_header(dst_fp, dtype, shape, dim);
 
                 for(i = 0; i < LIMIT; i++) {
-                        distrib = pow((float)count[i], ALPHA) / tmp;
+			if(MODE_ALPHA) 
+                        	distrib = pow((float)count[i], ALPHA) / tmp;
+			else
+				distrib = (float)count[i] / tmp;
                         fwrite(&distrib, sizeof(distrib), 1, dst_fp);
                 }
         }

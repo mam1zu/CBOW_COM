@@ -29,6 +29,9 @@
 #include <string.h>
 #include "common.h"
 
+#define VOCAB_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.nostopword.vocab"
+#define VOCABC_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.nostopword.vocabc"
+
 typedef struct vocabulary {
     char *word;
     long long count;
@@ -92,6 +95,16 @@ int get_counts(void) {
     HASHREC *htmp;
     VOCAB *vocab;
     FILE *fid = stdin;
+    FILE *vcb_fp, *vcbc_fp;
+    if((vcb_fp = fopen(VOCAB_FILE_PATH, "w")) == NULL) {
+	    fprintf(stderr, "Vocabulary File %s can't be opened\n", VOCAB_FILE_PATH);
+	    return -1;
+    }
+    if((vcbc_fp = fopen(VOCABC_FILE_PATH, "w")) == NULL) {
+	    fprintf(stderr, "Vocabulary count File %s can't be opened\n", VOCABC_FILE_PATH);
+	    return -2;
+    }
+
 
     fprintf(stderr, "BUILDING VOCABULARY\n");
     if (verbose > 1) fprintf(stderr, "Processed %lld tokens.", i);
@@ -136,7 +149,10 @@ int get_counts(void) {
             if (verbose > 0) fprintf(stderr, "Truncating vocabulary at min count %lld.\n",min_count);
             break;
         }
-        printf("%s %lld\n",vocab[i].word,vocab[i].count);
+	//CHECKPOINT: 1
+	fprintf(vcb_fp, "%s\n", vocab[i].word);
+	fprintf(vcbc_fp, "%s %lld\n", vocab[i].word, vocab[i].count);
+        //printf("%s %lld\n",vocab[i].word,vocab[i].count);
     }
 
     if (i == max_vocab && max_vocab < j) if (verbose > 0) fprintf(stderr, "Truncating vocabulary at size %lld.\n", max_vocab);

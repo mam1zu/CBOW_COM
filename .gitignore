@@ -4,3 +4,6 @@ models
 dataset
 model_*
 wiki-cleaned*
+cooccurences.*.bin
+cooccurences.bin
+benchmark

@@ -86,3 +86,20 @@ def _init_normal(vocab_size, emb_dim):
 
     return init_weights
 
+def load_dict(filename):
+    word_to_id = {}
+    id_to_word = {}
+    counter = 1
+    try:
+        with open(filename) as f:
+            for line in f:
+                line = line.replace("\n", "")
+                word_to_id[line] = counter
+                id_to_word[counter] = line
+                counter += 1
+    except FileNotFoundError as e:
+        print(f"{e}")
+        return None, None
+
+    return word_to_id, id_to_word
+

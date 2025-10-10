@@ -1,15 +1,11 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include "common.h"
+# Authors: The scikit-learn developers
+# SPDX-License-Identifier: BSD-3-Clause
 
-#define VOCAB_SIZE 100000
-#define STOP_WORD_NUM 318
-#define VCB_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.100000.vocab"
-#define SRC_FILE_PATH "/tf/paper/wikidata/wiki-cleaned.txt"
-#define DST_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.nostopword.txt"
-
-char *english_stop_words[] = {
+# This list of English stop words is taken from the "Glasgow Information
+# Retrieval Group". The original list can be found at
+# http://ir.dcs.gla.ac.uk/resources/linguistic_utils/stop_words
+ENGLISH_STOP_WORDS = frozenset(
+    [
         "a",
         "about",
         "above",
@@ -46,7 +42,7 @@ char *english_stop_words[] = {
         "at",
         "back",
         "be",
-        "became",
+        #"became",
         "because",
         "become",
         "becomes",
@@ -63,7 +59,7 @@ char *english_stop_words[] = {
         "beyond",
         "bill",
         "both",
-        "bottom",
+        #"bottom",
         "but",
         "by",
         "call",
@@ -78,14 +74,14 @@ char *english_stop_words[] = {
         "de",
         "describe",
         "detail",
-        "do",
+        #"do",
         "done",
         "down",
         "due",
         "during",
         "each",
         "eg",
-        "eight",
+        #"eight",
         "either",
         "eleven",
         "else",
@@ -104,23 +100,23 @@ char *english_stop_words[] = {
         "fifteen",
         "fifty",
         "fill",
-        "find",
+        #"find",
         "fire",
         "first",
-        "five",
+        #"five",
         "for",
         "former",
         "formerly",
         "forty",
         "found",
-        "four",
+        #"four",
         "from",
         "front",
         "full",
         "further",
-        "get",
-        "give",
-        "go",
+        #"get",
+        #"give",
+        #"go",
         "had",
         "has",
         "hasnt",
@@ -140,20 +136,20 @@ char *english_stop_words[] = {
         "his",
         "how",
         "however",
-        "hundred",
+        #"hundred",
         "i",
         "ie",
         "if",
         "in",
         "inc",
         "indeed",
-        "interest",
+        #"interest",
         "into",
         "is",
         "it",
         "its",
         "itself",
-        "keep",
+        #"keep",
         "last",
         "latter",
         "latterly",
@@ -165,7 +161,7 @@ char *english_stop_words[] = {
         "may",
         "me",
         "meanwhile",
-        "might",
+        #"might",
         "mill",
         "mine",
         "more",
@@ -183,7 +179,7 @@ char *english_stop_words[] = {
         "never",
         "nevertheless",
         "next",
-        "nine",
+        #"nine",
         "no",
         "nobody",
         "none",
@@ -198,7 +194,7 @@ char *english_stop_words[] = {
         "often",
         "on",
         "once",
-        "one",
+        #"one",
         "only",
         "onto",
         "or",
@@ -214,25 +210,25 @@ char *english_stop_words[] = {
         "part",
         "per",
         "perhaps",
-        "please",
-        "put",
+        #"please",
+        #"put",
         "rather",
         "re",
         "same",
         "see",
-        "seem",
-        "seemed",
-        "seeming",
-        "seems",
+        #"seem",
+        #"seemed",
+        #"seeming",
+        #"seems",
         "serious",
         "several",
         "she",
         "should",
         "show",
-        "side",
+        #"side",
         "since",
         "sincere",
-        "six",
+        #"six",
         "sixty",
         "so",
         "some",
@@ -245,8 +241,8 @@ char *english_stop_words[] = {
         "still",
         "such",
         "system",
-        "take",
-        "ten",
+        #"take",
+        #"ten",
         "than",
         "that",
         "the",
@@ -269,7 +265,7 @@ char *english_stop_words[] = {
         "this",
         "those",
         "though",
-        "three",
+        #"three",
         "through",
         "throughout",
         "thru",
@@ -277,12 +273,12 @@ char *english_stop_words[] = {
         "to",
         "together",
         "too",
-        "top",
+        #"top",
         "toward",
         "towards",
         "twelve",
         "twenty",
-        "two",
+        #"two",
         "un",
         "under",
         "until",
@@ -328,97 +324,9 @@ char *english_stop_words[] = {
         "yours",
         "yourself",
         "yourselves",
-};
-
-HASHREC *hashsearch(HASHREC **ht, char *w) {
-	HASHREC *htmp, *hprv;
-	unsigned int hval = HASHFN(w, TSIZE, SEED);
-	for (hprv = NULL, htmp=ht[hval]; htmp != NULL && scmp(htmp->word, w) != 0; hprv = htmp, htmp = htmp->next);
-	if(htmp != NULL && hprv != NULL) {
-		hprv->next = htmp->next;
-		htmp->next = ht[hval];
-		ht[hval] = htmp;
-	}
-	return(htmp);
-}
-
-void hashinsert(HASHREC **ht, char *w, long long id) {
-	HASHREC *htmp, *hprv;
-	unsigned int hval = HASHFN(w, TSIZE, SEED);
-	for(hprv = NULL, htmp = ht[hval]; htmp != NULL && scmp(htmp->word, w) != 0; hprv = htmp, htmp = htmp->next);
-	if(htmp == NULL) {
-		htmp = (HASHREC *)malloc(sizeof(HASHREC));
-		htmp->word = (char *)malloc(strlen(w) + 1);
-		strcpy(htmp->word, w);
-		htmp->num = id;
-		htmp->next = NULL;
-		if(hprv == NULL) ht[hval] = htmp;
-		else hprv->next = htmp;
-	}
-	else
-		fprintf(stderr, "Error, duplicate entry located: %s.\n", htmp->word);
-	return;
-}
-
-int main(void) {
-	FILE *vcb_fp, *src_fp, *dst_fp;
-	HASHREC **stopwords_ht = inithashtable();
-	HASHREC *htmp;
-	int flag, id = 1;
-	long long i;
-	char ch[256];
-	// if((vcb_fp = fopen(VCB_FILE_PATH, "r")) == NULL) {
-	// 	fprintf(stderr, "Vocabulary File %s not found\n", VCB_FILE_PATH);
-	// 	return 1;
-	// }
-
-	if((src_fp = fopen(SRC_FILE_PATH, "r")) == NULL) {
-		fprintf(stderr, "Corpus File %s not found\n", SRC_FILE_PATH);
-		return 2;
-	}
-
-	if((dst_fp = fopen(DST_FILE_PATH, "w")) == NULL) {
-		fprintf(stderr, "Destination File %s can't be opened\n", DST_FILE_PATH);
-		return 3;
-	}
-
-	fprintf(stderr, "Generating hashtable of stopwords only\n");
-
-	for(i = 0; i < STOP_WORD_NUM; i++) {
-		hashinsert(stopwords_ht, english_stop_words[i], id);
-		id++;
-	}
-
-	fprintf(stderr, "Done. Stop word count: %d\n", id);
-
-	fprintf(stderr, "Scanning and Removing stop words from corpus.");
-	i = 0;
-	fprintf(stderr, "Processed %lld token.", i);
-	while(1) {
-
-		flag = get_word(ch, src_fp);
-		if(flag == 1) {
-			if(feof(src_fp)) break;
-			else {
-				//space
-				fprintf(dst_fp, "\n");
-				continue;
-			}
-		}
-
-		htmp = hashsearch(stopwords_ht, ch);
-		if(htmp != NULL) continue; //stop word detected
-		fprintf(dst_fp, "%s ", ch);
-
-		if((i++) % 100000 == 0) fprintf(stderr, "\r\033[0KProcessed %lld token.", i);
-	}
-
-	fprintf(stderr, "\r\033[0KProcessed %lld token\n", i);
-	fprintf(stderr, "Done\n");
-
-	//fclose(vcb_fp);
-	fclose(src_fp);
-	fclose(dst_fp);
-	free_table(stopwords_ht);
-
-}
+        "st", #Gensimのwikicorpusによって数字は除去されているが, 序数接尾詞が除去されていないため手動で除去する
+        "nd",
+        "rd",
+        "th",
+    ]
+)

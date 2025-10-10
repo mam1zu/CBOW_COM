@@ -8,9 +8,9 @@
 #define VOCAB_SIZE 100000
 #define EMB_DIM 300
 #define WINDOW_SIZE 10
-#define CORPUS_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.nostopword.100000.txt"
+#define CORPUS_FILE_PATH "/tf/paper/cbow-com/utils/wiki-cleaned.nostopword.100000.txt"
 #define TARGET_DIRECTORY_PATH "/tf/paper/cbow-com/dataset/window_10/"
-#define VCB_FILE_PATH "/tf/paper/cbow-com/clang-utils/wiki-cleaned.nostopword.100000.vocab"
+#define VCB_FILE_PATH "/tf/paper/cbow-com/utils/wiki-cleaned.nostopword.vocab"
 
 HASHREC *hashsearch(HASHREC **ht, char *w) {
 	HASHREC *htmp, *hprv;
@@ -200,13 +200,14 @@ int main(void) {
 
 	FILE *vcb_fp, *src_fp, *fid;
 	char filename[128], file_head[] = "wiki-cleaned.nostopword.100000.train";
-	long long counter, flag, i, j, k;
+	long long counter, flag, i, j, k, history_idx = 0, left_idx, right_idx;
+	//history_idx: 配列historyの次に書き込む予定であるポジションのポインタ
 	int centre_id, context_id, byte_counter = 0;
 	unsigned int file_counter = 0;
 	HASHREC **vocab_hash = inithashtable(), *htmp, *hprv;
 	char ch[MAX_STRING_LENGTH];
-	int *history_left = (int *)calloc(window_size, sizeof(int));
-	int *history_right = (int *)calloc(window_size, sizeof(int));
+
+	int *history = (int *)calloc(window_size * 2 + 1, sizeof(int));
 
 	if((vcb_fp = fopen(VCB_FILE_PATH, "r")) == NULL) {
 		fprintf(stderr, "Vocabulary File %s not found.\n", VCB_FILE_PATH);
@@ -243,44 +244,107 @@ int main(void) {
 
 	if(DEBUG) fprintf(stderr, "DEBUG COUNTER: %d\n", debug_counter++);
 
-	while(1) {
+	//まず最初にウィンドウをロード
 
+	for(k = 0; k < window_size; k++) {
 		flag = get_word(ch, src_fp);
+		if (flag == 1) break;
+		htmp = hashsearch(vocab_hash, ch);
+		if(htmp != NULL) {
+			history[history_idx % (window_size*2+1)] = htmp->num;
+			history_idx++;
+		}
+	}
 
+	while(1) {
+		flag = get_word(ch, src_fp);
 		if(flag == 1) {
 			if(feof(src_fp)) break;
-			else {
-				//改行を検知 コンテキストウィンドウはリセット
-				for(k = 0; k < window_size; k++) {
-					history_left[k] = 0; //コンテキストウィンドウ内の-1は何も意味しない
-					//history_right[k] = -1; //どうせこの後右側ウィンドウをロードする
+			//改行を検知, コンテキストウィンドウのリセット
+			memset(history, 0, sizeof(int) * (window_size * 2 + 1));
+			history_idx = 0;
+
+			//次の文章の右側ウィンドウをロードする
+			for(k = 0; k < window_size; k++) {
+				flag = get_word(ch, src_fp);
+				if (flag == 1) break;
+				htmp = hashsearch(vocab_hash, ch);
+				if(htmp != NULL) {
+					history[history_idx % (window_size*2+1)] = htmp->num;
+					history_idx++;
 				}
-				j = 0; 
-				continue;
 			}
+			continue;
 		}
+
 
 		htmp = hashsearch(vocab_hash, ch);
+		if(htmp == NULL) continue; //ボキャブラリに存在しない スキップ
+		history[history_idx % (window_size*2 + 1)] = htmp->num; //ウィンドウに単語追加
+		history_idx++;
 
-		if(htmp == NULL) continue;
+		int centre_idx = (history_idx-1 - window_size + (window_size * 2 + 1)) % (window_size * 2 + 1);
+		centre_id = history[centre_idx];
+		fwrite(&centre_id, sizeof(int), 1, fid);
 
-		centre_id = htmp->num; // word id
-
-		//history_left[j % window_size] = context_id;
-
+		//左側文脈を書き出す
+		for(k = 1; k <= window_size; k++) {
+			//history_idx - window_size % (window_size * 2)で, 中心単語のインデックス
+			// そこから-kをしていくことで、左側単語を抽出する
+			// +(window_size * 2)は, history_idx - window_size - kが負になったとき,
+			// 未定義動作が発生する可能性があるため, window_size * 2だけ足して
+			// 負値での剰余演算が発生しないようにする. 計算結果に影響はない.
+			left_idx = (history_idx-1 - window_size - k + (window_size * 2+1)) % (window_size*2+1);
+			fwrite(&history[left_idx], sizeof(int), 1, fid);
+		}
 		for(k = 0; k < window_size; k++) {
-			if(get_word(ch, src_fp) == 1)  {
-				byte_counter += 1;
-				break;
-			}
-
-			htmp = hashsearch(vocab_hash, ch);
-			byte_counter += (strlen(ch) + 1) * sizeof(char); //文字数+空白分 のバイト数
-			if(htmp != NULL) history_right[k % window_size] = htmp->num;
+			right_idx = (history_idx-1 - window_size + k + (window_size * 2 + 1)) % (window_size * 2 + 1);
+			fwrite(&history[right_idx], sizeof(int), 1, fid);
 		}
 
-		fseek(src_fp, -byte_counter, SEEK_CUR); //先読みした分だけカーソルを戻す
-		byte_counter = 0;
+		j++;
+		counter++;
+		if((counter % 100000) == 0) fprintf(stderr, "\r\033[0KProcessed %lld token.", counter);
+		if((counter % 16777216) == 0) {
+			//学習データは16777216(=2^24)個ごとにファイル分割を行いたい
+			fprintf(stderr, "\r\033[0KProcessed %lld token.", counter);
+			shape[0] = 16777216;
+			fseek(fid, 0, SEEK_SET);
+			write_npy_header(fid, dtype, shape, dim);
+			fflush(fid);
+			fclose(fid);
+			file_counter++;
+			sprintf(filename, "%s%s.%04d", TARGET_DIRECTORY_PATH, file_head, file_counter);
+			fid = fopen(filename, "wb");
+			write_header_reserve(fid, 128);
+		}
+
+	}
+
+		// htmp = hashsearch(vocab_hash, ch);
+
+		// if(htmp == NULL) continue;
+
+		// centre_id = htmp->num; // word id
+
+		// //history_left[j % window_size] = context_id;
+
+		// for(k = 0; k < window_size; k++) {
+		// 	if(get_word(ch, src_fp) == 1)  {
+		// 		byte_counter += 1;
+		// 		break;
+		// 	}
+
+		// 	htmp = hashsearch(vocab_hash, ch);
+		// 	byte_counter += (strlen(ch) + 1) * sizeof(char); //文字数+空白分 のバイト数
+		// 	if(htmp != NULL) {
+		// 		history[history_idx % (window_size * 2)] = htmp->num;
+		// 		history_idx++;
+		// 	}
+		// }
+
+		//fseek(src_fp, -byte_counter, SEEK_CUR); //先読みした分だけカーソルを戻す
+		// byte_counter = 0;
 		// if(j == 0) {
 		// 	//新しい行であるので、右側のコンテキストをロードする
 		// 	for(i = 1; i <= window_size; ++i) {
@@ -316,29 +380,6 @@ int main(void) {
 		
 		//次の単語を読み込み、history_rightにロードする
 
-		fwrite(&centre_id, sizeof(int), 1, fid);
-		fwrite(history_left, sizeof(int), WINDOW_SIZE, fid);
-		fwrite(history_right, sizeof(int), WINDOW_SIZE, fid);
-
-		history_left[j % window_size] = centre_id; //左ウィンドウに今回の中心単語をいれる
-
-		j++;
-		counter++;
-		if((counter % 100000) == 0) fprintf(stderr, "\r\033[0KProcessed %lld token.", counter);
-		if((counter % 16777216) == 0) {
-			//学習データは16777216(=2^24)個ごとにファイル分割を行いたい
-			shape[0] = 16777216;
-			fseek(fid, 0, SEEK_SET);
-			write_npy_header(fid, dtype, shape, dim);
-			fflush(fid);
-			fclose(fid);
-			file_counter++;
-			sprintf(filename, "%s%s.%04d", TARGET_DIRECTORY_PATH, file_head, file_counter);
-			fid = fopen(filename, "wb");
-			write_header_reserve(fid, 128);
-		}
-	}
-
 	shape[0] = counter % 16777216;
 	fseek(fid, 0, SEEK_SET);
 	write_npy_header(fid, dtype, shape, dim);
@@ -347,5 +388,5 @@ int main(void) {
 
 	fclose(vcb_fp);
 	free_table(vocab_hash);
-	free_history(history_left, history_right);
+	free(history);
 }

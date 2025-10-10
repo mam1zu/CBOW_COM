@@ -8,14 +8,16 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import numpy as np
 import time
-from tqdm import tqdm
+from functools import partial
+from tqdm import tqdm as std_tqdm
 from utils import preprocess
 from utils import create_contexts_target
 from utils import cos_similarity
 from utils import _init_normal
 from WikiLoader import CustomDataset
+from WikiLoader import WikiDataset
 device = 'cuda' if torch.cuda.is_available else 'cpu'
-
+tqdm = partial(std_tqdm, dynamic_ncols=True)
 class CBOWNet(nn.Module):
     def __init__(self, vocab_size, emb_dim, weights=None, padding_idx=0):
         super(CBOWNet, self).__init__()
@@ -23,15 +25,16 @@ class CBOWNet(nn.Module):
         self.vocab_size = vocab_size
         self.emb_dim = emb_dim
         self.padding_idx = padding_idx
-        self.input_emb = nn.Embedding(vocab_size, emb_dim, padding_idx=self.padding_idx)#パディングインデックスを追加するためvocab_sizeは実際の語彙数より+1となる
+        #self.input_emb = nn.Embedding(vocab_size, emb_dim, padding_idx=self.padding_idx)#パディングインデックスを追加するためvocab_sizeは実際の語彙数より+1となる
+        self.input_emb = nn.EmbeddingBag(vocab_size, emb_dim, mode='mean', padding_idx=self.padding_idx)
         self.output_emb = nn.Embedding(vocab_size, emb_dim)
         #Attention Word Embeddingでは、input_embとoutput_embは一致させるが、今のところは別とする
 
-        #ネガティブサンプリングのやつ
-        if self.weights is not None:
-            wf = np.power(self.weights, 0.75)
-            wf /= np.sum(wf)
-            self.weights = torch.FloatTensor(wf)
+        #ネガティブサンプリングのやつ. 今回の実装ではすでに0.75乗してあるので無効化する
+        # if self.weights is not None:
+        #     wf = np.power(self.weights, 0.75)
+        #     wf /= np.sum(wf)
+        #     self.weights = torch.FloatTensor(wf)
         
     def forward(self, context_ids, centre_id, neg_ids):
 
@@ -39,7 +42,8 @@ class CBOWNet(nn.Module):
         context_embedding = self.input_emb(context_ids) # shape: (batch_size, window_size*2, emb_dim)
         
         #2. ウィンドウ内の周辺単語のベクトルの平均をとる、これが中間層への入力となる
-        context_embedding = torch.mean(context_embedding, dim=1) # shape: (batch_size, emb_dim)
+        #テスト: EmbeddingBagによって自動的に平均化してみる
+        # context_embedding = torch.mean(context_embedding, dim=1) # shape: (batch_size, emb_dim)
         
         #3. 出力層側での正例の単語ベクトルを取得
         positive_sample = self.output_emb(centre_id) # shape: (batch_size, emb_dim)
@@ -57,7 +61,7 @@ class CBOWNet(nn.Module):
         context_embedding = context_embedding.unsqueeze(1) # shape: (batch_size, 1, emb_dim)
 
         #8. 負例に関するネットワークのそのままの出力(=スコア)を計算
-        negative_score = torch.bmm(context_embedding, negative_embedding.transpose(1, 2)).squeeze(1) # shape: (batch_size, num_negatice_samples)
+        negative_score = torch.bmm(context_embedding, negative_embedding.transpose(1, 2)).squeeze(1) # shape: (batch_size, num_negative_samples)
         
         #9. 負例スコアをシグモイド関数(-1, 1)に通した後logで尤度化(-inf, 0)
         negative_loss = F.logsigmoid(-negative_score).sum(dim=1) #shape: (batch_size)
@@ -66,14 +70,15 @@ class CBOWNet(nn.Module):
         return -(positive_loss + negative_loss).mean() #バッチ方向で平均
     
 
-num_negative_samples = 10
+num_negative_samples = 5
 
 emb_dim = 300
 model = CBOWNet(100001, emb_dim=emb_dim)
 #model.input_emb.weight = nn.Parameter()
-#model.load_state_dict(torch.load("./model_2.pth"))
+#model.load_state_dict(torch.load("./models/dim_300/model_negs_35.pth"))
 model = model.to(device)
-optimizer = optim.SGD(model.parameters(), lr=0.025, momentum=0.9, weight_decay=5e-4)
+optimizer = optim.SGD(model.parameters(), lr=0.005, momentum=0.9, weight_decay=5e-4)
+#optimizer = optim.Adam(model.parameters())
 weights = torch.from_numpy(np.load("./wiki-cleaned.nostopword.100000.negdist.npy")).to(device, dtype=torch.float) #negative sampling weights
 #optimizer = optim.SGD(model.parameters(), lr=0.025)
 
@@ -88,7 +93,7 @@ weights = torch.from_numpy(np.load("./wiki-cleaned.nostopword.100000.negdist.npy
 #                 loss.backward()
 #                 optimizer.step()
 
-for epoch in tqdm(range(1)):
+for epoch in tqdm(range(3)):
     dataset_idx = 0
     loss_all = 0
     if dataset_idx == -1:
@@ -99,12 +104,12 @@ for epoch in tqdm(range(1)):
         data = dataset[:, 1:] #context
         labels = dataset[:, 0] #centre
         custom_dataset= CustomDataset(data, labels)
-        custom_dataset.data = torch.from_numpy(custom_dataset.data).to(device)
-        custom_dataset.labels = torch.from_numpy(custom_dataset.labels).to(device)
-        data_loader = DataLoader(dataset=custom_dataset, batch_size=8192, shuffle=True)
+        #custom_dataset.data = torch.from_numpy(custom_dataset.data).to(device)
+        #custom_dataset.labels = torch.from_numpy(custom_dataset.labels).to(device)
+        data_loader = DataLoader(dataset=custom_dataset, batch_size=16384, shuffle=True, num_workers=8, pin_memory=True)
         for batch in tqdm(data_loader):
-            context_ids = batch['data'].to(device, dtype=torch.long)
-            centre_ids = batch['labels'].to(device, dtype=torch.long)
+            context_ids = batch['data'].to(device, non_blocking=True, dtype=torch.long)
+            centre_ids = batch['labels'].to(device, non_blocking=True, dtype=torch.long)
 
             batch_size = centre_ids.shape[0]
             neg_ids = torch.multinomial(weights, batch_size * num_negative_samples, replacement=True)
@@ -115,12 +120,13 @@ for epoch in tqdm(range(1)):
             loss.backward()
             optimizer.step()
             loss_all += loss.item()
-
-        torch.save(model.state_dict(), f"./models/dim_{emb_dim}/model_negs_{dataset_idx}.pth")
-        if dataset_idx == 20:
+        
+        if dataset_idx % 25 == 0:
+            torch.save(model.state_dict(), f"./models/dim_{emb_dim}/model_SGD_lr_0.005_negs_{num_negative_samples}_epoch_{epoch}_{dataset_idx}.pth")
+        if dataset_idx == 120:
+            torch.save(model.state_dict(), f"./models/dim_{emb_dim}/model_SGD_lr_0.005_negs_{num_negative_samples}_epoch_{epoch}_{dataset_idx}.pth")
             break
         dataset_idx += 1
-    print("epoch {epoch} loss_all: {loss_all:.4f}")
     loss_all = 0
     
     
