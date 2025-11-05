@@ -8,9 +8,9 @@
 
 #define SRC_FILE_PATH "/tf/paper/wikidata/wiki-cleaned.txt"
 #define DST_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.100000.txt.test"
-#define VCB_FILE_PATH "/tf/paper/cbow-com/wiki-cleaned.nostopword.400000.vocab"
+#define VCB_FILE_PATH "/tf/paper/cbow-com/utils/wiki-cleaned.nostopword.100000.vocab"
 #define UNK_TOKEN "<UNK>"
-#define VOCAB_SIZE 400000
+#define VOCAB_SIZE 100001
 
 int word_counter = 1;
 char **id_to_word;
@@ -134,7 +134,7 @@ int main(void) {
 				fprintf(stderr, "BYE\n");
 				break;
 			}
-			if(0 <= id && id <= 100001) {
+			if(0 <= id && id <= VOCAB_SIZE) {
 				fprintf(stderr, "%s\n", id_to_word[id]);
 			}
 			else {

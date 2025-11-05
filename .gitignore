@@ -7,3 +7,6 @@ wiki-cleaned*
 cooccurences.*.bin
 cooccurences.bin
 benchmark
+comat_dense*
+./utils/wiki-cleaned*
+.ipynb_checkpoints

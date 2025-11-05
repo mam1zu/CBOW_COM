@@ -44,9 +44,9 @@ ENGLISH_STOP_WORDS = frozenset(
         "be",
         #"became",
         "because",
-        "become",
-        "becomes",
-        "becoming",
+        #"become",
+        #"becomes",
+        #"becoming",
         "been",
         "before",
         "beforehand",
@@ -63,7 +63,7 @@ ENGLISH_STOP_WORDS = frozenset(
         "but",
         "by",
         "call",
-        "can",
+        #"can", used in MEN
         "cannot",
         "cant",
         "co",
@@ -101,7 +101,7 @@ ENGLISH_STOP_WORDS = frozenset(
         "fifty",
         "fill",
         #"find",
-        "fire",
+        #"fire", used in MEN
         "first",
         #"five",
         "for",
@@ -162,7 +162,7 @@ ENGLISH_STOP_WORDS = frozenset(
         "me",
         "meanwhile",
         #"might",
-        "mill",
+        #"mill", used in MEN
         "mine",
         "more",
         "moreover",
@@ -224,7 +224,7 @@ ENGLISH_STOP_WORDS = frozenset(
         "several",
         "she",
         "should",
-        "show",
+        #"show", used in MEN
         #"side",
         "since",
         "sincere",

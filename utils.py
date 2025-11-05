@@ -62,8 +62,9 @@ def generate_negative_samples(corpus, word_prob, centre_word_idx):
     word_prob[centre_word_idx] = 0
     word_prob /= (1 / torch.sum(word_prob))
 
+# x: torch.tensor, shape: [batch_size]
 def glove_weight_function(x, x_max=100):
-        return torch.clip(torch.Tensor(x/x_max), 1e-8, 1)
+    return np.clip(np.div(x, x_max), 1e-8, 1)
 
 def generate_co_occurrence_matrix(corpus, vocab_size, window_size=1):
 
@@ -103,3 +104,21 @@ def load_dict(filename):
 
     return word_to_id, id_to_word
 
+def most_similar(model, vocab_size, word_emb, scope=5, mode="positive"):
+
+    cos_sim_list = []
+    counter = 1
+    one_float_tensor = torch.tensor(1.0, dtype=torch.float32)
+    other_words = torch.tensor([i for i in range(1, vocab_size)])
+    other_word_embs = model.input_emb(other_words)
+
+    for other_word_emb in other_word_embs:
+        cos_sim = cos_similarity(other_word_emb, word_emb)
+        if cos_sim >= one_float_tensor:
+            #コサイン類似度が1なら流石に同一単語
+            counter += 1
+            continue
+        cos_sim_list.append([counter, cos_sim])
+        counter += 1
+    cos_sim_list.sort(key=lambda x: x[1], reverse=True if mode == 'positive' else False)
+    return cos_sim_list[:scope]

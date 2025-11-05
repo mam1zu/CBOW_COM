@@ -4,10 +4,10 @@ import operator
 import numpy as np
 from _stop_words import ENGLISH_STOP_WORDS
 
-VOCAB_SIZE = 400000
+VOCAB_SIZE = 100000
 SRC_FILE_PATH = f"../../wikidata/wiki-cleaned.txt" #wiki-cleaned
-VCB_FILE_PATH = f"./wiki-cleaned.nostopword.400000.vocab" #wiki-cleaned.
-VCBC_FILE_PATH = f"./wiki-cleaned.nostopword.400000.vocabc"
+VCB_FILE_PATH = f"./wiki-cleaned.nostopword.100000.vocab" #wiki-cleaned.
+VCBC_FILE_PATH = f"./wiki-cleaned.nostopword.100000.vocabc"
 DST_FILE_PATH = f"./wiki-cleaned.nostopword.{VOCAB_SIZE}.txt" #wiki-cleaned.nostopword.[VOCAB_SIZE].txt
 
 vocab_dict = {}
@@ -169,6 +169,9 @@ def main():
     else:
         vocab_array = vocab_count() #array of [word, count]
         vocab_array = vocab_array[:VOCAB_SIZE] #Cut vocabulary
+        vocab_array[VOCAB_SIZE-3] = ['suds', 736] #For MEN
+        vocab_array[VOCAB_SIZE-2] = ['orthodontist', 570] #For MEN
+        vocab_array[VOCAB_SIZE-1] = ['disorganize', 62] #For SimLex-999
         write_vocab_files(vocab_array)
         print("Phase 1: Counting finished and saved.")
     

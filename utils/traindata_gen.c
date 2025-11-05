@@ -8,9 +8,9 @@
 #define VOCAB_SIZE 100000
 #define EMB_DIM 300
 #define WINDOW_SIZE 5
-#define CORPUS_FILE_PATH "/tf/paper/cbow-com/utils/wiki-cleaned.nostopword.400000.txt"
+#define CORPUS_FILE_PATH "/tf/paper/cbow-com/utils/wiki-cleaned.nostopword.100000.txt"
 #define TARGET_DIRECTORY_PATH "/tf/paper/cbow-com/dataset/window_5/"
-#define VCB_FILE_PATH "/tf/paper/cbow-com/utils/wiki-cleaned.nostopword.400000.vocab"
+#define VCB_FILE_PATH "/tf/paper/cbow-com/utils/wiki-cleaned.nostopword.100000.vocab"
 
 HASHREC *hashsearch(HASHREC **ht, char *w) {
 	HASHREC *htmp, *hprv;
@@ -147,6 +147,13 @@ int write_npy_header(FILE *fin, char dtype[], long long *shape, int dim) {
 
 }
 
+int check_contains_zero(int *arr, int len) {
+	if (arr == NULL) return -1;
+	for(int i = 0; i < len; i++)
+		if(arr[i] == 0) return 1;
+	return 0;
+}
+
 // int main(void) {
 // 	FILE *file;
 // 	long long i, elements = 1;
@@ -199,16 +206,18 @@ int main(void) {
 	long long id_counter = 0; //0はなにか別のことに使うかもしれないので、++id_counterでインクリメントして0は残しておく
 
 	FILE *vcb_fp, *src_fp, *fid;
-	char filename[128], file_head[] = "wiki-cleaned.nostopword.400000.train";
+	char filename[256], file_head[128];
 	long long counter, flag, i, j, k;
 	int centre_id, context_id, byte_counter = 0, history_idx;
 	unsigned int file_counter = 0;
 	HASHREC **vocab_hash = inithashtable(), *htmp, *hprv;
 	char ch[MAX_STRING_LENGTH];
+	sprintf(file_head, "wiki-cleaned.nostopword.%d.train", VOCAB_SIZE);
 
 	int *history = (int *)calloc(window_size*2+1, sizeof(int));
 	int *history_left = (int *)calloc(window_size, sizeof(int));
 	int *history_right = (int *)calloc(window_size, sizeof(int));
+
 
 	if((vcb_fp = fopen(VCB_FILE_PATH, "r")) == NULL) {
 		fprintf(stderr, "Vocabulary File %s not found.\n", VCB_FILE_PATH);
@@ -262,15 +271,6 @@ int main(void) {
 			if(feof(src_fp)) break;
 			memset(history, 0, sizeof(int) * (window_size * 2 + 1));
 			history_idx = 0;
-			for(k = 0; k < window_size; k++) {
-				flag = get_word(ch, src_fp);
-				if(flag==1) break;
-				htmp = hashsearch(vocab_hash, ch);
-				if(htmp != NULL) {
-					history[history_idx % (window_size * 2 + 1)] = htmp->num;
-					history_idx++;
-				}
-			}
 			continue;
 		}
 
@@ -278,12 +278,14 @@ int main(void) {
 		if(htmp == NULL) continue;
 		history[history_idx % (window_size * 2 + 1)] = htmp->num;
 		history_idx++;
+		if(check_contains_zero(history, window_size*2+1)) {
+			continue;
+		}
 
 		//history_idx-1 - window_size: 中心単語のインデックス
 		// window_size*2+1を足すのは, 負の剰余演算で未定義動作が発生するのを防ぐため
 
 		centre_id = history[(history_idx-1 - window_size + window_size*2 + 1) % (window_size*2+1)];
-
 		fwrite(&centre_id, sizeof(int), 1, fid);
 
 		for(k = 1; k <= window_size; k++) {
