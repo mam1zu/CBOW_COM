@@ -1,5 +1,3 @@
-# CBOW normal
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -14,191 +12,35 @@ import glob
 import gc
 from functools import partial
 from tqdm import tqdm as std_tqdm
-from utils import cos_similarity, load_dict, glove_weight_function
+from utils import cos_similarity, load_dict, most_similar
 from CustomLoader import CustomDataset#, WikiDataset
 from scipy import sparse
+import pandas as pd
 from scipy.stats import spearmanr, rankdata
 from ws353benchmark import get_dataframe
-device = 'cuda' if torch.cuda.is_available else 'cpu'
-tqdm = partial(std_tqdm, dynamic_ncols=True)
-#動作確認用
-np.random.seed(0)
-torch.cuda.manual_seed(0)
-torch.manual_seed(0)
+from analogybenchmark import get_benchmark_dataset, get_file_list
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
 
-#default hyper-parameter settings
-window_size = 5
-num_negative_samples = 5
-emb_dim = 300
-seed = 0
+
+device = "cuda" if torch.cuda.is_available else "cpu"
+verbose = 1
 
 args = sys.argv
-print("CBOW with Cooccurrence Matrix, negative sampling")
-if len(args) <= 1:
+print("Model Loader, CBOW with Cooccurrence Matrix, negative sampling")
+if len(args) <= 0:
     print("no parameters are set, use default settings")
-elif len(args) != 5:
+    window_size = 5
+    emb_dim = 300
+    epoch = 4
+elif len(args) != 4:
     print("num of parameters doesn't match, abort!")
-    print(f"example: python3 {args[0]} [window_size] [num_negs]")
+    print(f"example: python3 {args[0]} [window_size] [emb_dim] [epoch]")
     sys.exit(1)
 else:
     window_size = int(args[1])
-    num_negative_samples = int(args[2])
-    emb_dim = int(args[3])
-    
-    seed = int(args[4])
-    np.random.seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.manual_seed(seed)
-
-print(f"window_size: {window_size}")
-print(f"num_negative_samples: {num_negative_samples}")
-print(f"emb_dim: {emb_dim}")
-print(f"seed: {seed}")
-
-
-
-def eval_benchmark(benchmark_type: str):
-    df = get_dataframe(benchmark_type)
-    if df is None:
-        print("Such benchmark type does not exist!")
-        return None
-    data_length = len(df)
-    word1_series = df['word1']
-    word2_series = df['word2']
-    human_value_series = df['human_value']
-
-    cos_sim = []
-    human_value_list = []
-
-    for i in range(data_length):
-        word1 = word1_series[i].lower()
-        word2 = word2_series[i].lower()
-        human_value = human_value_series[i]
-
-        if word1 is None:
-            break
-        try:
-            word1_vector = model.input_emb(torch.tensor(word_to_id[word1]).to(device))
-            word2_vector = model.input_emb(torch.tensor(word_to_id[word2]).to(device))
-            cos_sim.append(F.cosine_similarity(word1_vector.to('cpu'), word2_vector.to('cpu'), dim=0).item())
-            human_value_list.append(human_value)
-        except KeyError:
-            continue
-
-    spearman_correlation, _ = spearmanr(cos_sim, human_value_list)
-    return spearman_correlation
-
-def _init_normalized():
-    #Word2Vec original implementation
-    padding_vector = np.zeros((1, emb_dim), dtype=np.float32)
-    init_weights = np.random.uniform(
-        size=(vocab_size, emb_dim),
-        low  = -0.5 / emb_dim,
-        high = 0.5 / emb_dim,
-        ).astype(np.float32)
-    init_weights = torch.from_numpy(np.concatenate((padding_vector, init_weights)))
-    return init_weights
-
-
-# custom_collate_fn
-# 学習データに中心単語の共起情報を付与する
-def collate_fn_dense(data_list):
-
-    batch = default_collate(data_list)
-    centre_id = batch['labels']
-    context_ids = batch['data']
-    #batch_size = centre_ids.shape[0]
-
-    comat_row_idx = centre_id[:, torch.newaxis]
-    comat_data = comat[comat_row_idx - 1, context_ids - 1].float()
-    batch['comat_data'] = comat_data
-    return batch
-
-
-def suggested_collate_fn(data_list):
-    
-    batch = default_collate(data_list)
-    
-    centre_ids: np.ndarray = batch['labels'].numpy()
-    context_ids: np.ndarray = batch['data'].numpy()
-    batch_size: int = centre_ids.shape[0]
-    rows_comat_csr = comat[centre_ids]
-    rows_comat_dense = rows_comat_csr.toarray()
-    row_idx_gather = np.arange(batch_size).reshape(-1, 1)
-    batch_comat_data = rows_comat_dense[row_idx_gather, context_ids]
-
-    assert batch_comat_data.shape == (batch_size, window_size * 2)
-    
-    batch['comat_data'] = torch.from_numpy(batch_comat_data)
-    return batch
-
-def collate_fn_fancyindexing(data_list):
-    batch : list = default_collate(data_list)
-    centre_ids  : np.ndarray = batch['labels'].numpy()        # shape: [batch_size]
-    context_ids : np.ndarray = batch['data'].numpy()         # shape: [batch_size, window_size*2]
-    batch_size = centre_ids.shape[0]
-    hoge = np.zeros((batch_size, window_size * 2), dtype=np.uint8)
-    rows_comat = comat[centre_ids]
-
-    row_indices = np.repeat(np.arange(batch_size), window_size * 2)
-    col_indices = context_ids.flatten()
-    
-    batch['comat_data'] = torch.from_numpy(rows_comat[row_indices, col_indices].A.flatten().reshape(batch_size, window_size*2))
-
-    # for i in range(batch_size):
-    #     row_comat = rows_comat.getrow(i)
-    #     row_comat = row_comat[:, context_ids[i]].todense()
-    #     hoge[i] = row_comat
-    
-    # batch['comat_data'] = torch.from_numpy(hoge)
-    return batch
-
-def custom_collate_fn(data_list):
-    
-    batch       : list       = default_collate(data_list)
-    batch['data'], _ = torch.sort(batch['data'])
-    centre_ids  : np.ndarray = batch['labels'].numpy()        # shape: [batch_size]
-    context_ids : np.ndarray = batch['data'].numpy()         # shape: [batch_size, window_size*2]
-    batch_size  : int        = centre_ids.shape[0]
-    
-    rows_comat  : sparse.csr_matrix = comat[centre_ids]
-    #assert rows_comat.shape == (batch_size, vocab_size+1)
-    #del centre_ids
-
-    mask_col    : np.ndarray        = np.int32(context_ids.flatten())
-    #assert mask_col.size == batch_size*window_size*2
-    #del context_ids
-
-    mask_row    : np.ndarray        = np.int32(np.repeat(np.arange(batch_size), window_size * 2))
-    #assert mask_row.size == batch_size*window_size*2
-    mask = np.ndarray(shape=(batch_size, vocab_size), dtype=np.uint8)
-    mask[mask_row, mask_col] = 1
-
-    data        : np.ndarray        = np.ones(mask_col.shape[0], dtype=np.int8)
-    #assert data.size == batch_size*window_size*2
-
-    #rows_mask   : sparse.coo_matrix = sparse.coo_matrix((data, (mask_row, mask_col)), shape=(batch_size, vocab_size+1))
-    #rows_mask   : sparse.csr_matrix = rows_mask.tocsr() # shape: [batch_size, vocab_size], size: [batch_size*window_size*2]
-    """
-    一つの学習データに同一の周辺単語が複数回発生するとき
-    マスク用の行列をCSR行列に変換する際, ある中心単語とその周辺単語の要素'1'が合算され2以上になる
-    このとき非ゼロ要素の個数はbatch_size * window_size * 2より小さくなり,
-    アダマール積後の疎行列のdata配列を用いて非ゼロ要素のみ取り出し,
-    context_idsのshapeと一致させるという手法は正常に動作しない
-    """
-
-    #assert rows_mask.shape == (batch_size, vocab_size+1)
-    #comat_data  : sparse.csr_matrix = rows_comat.multiply(rows_mask)
-    comat_data = rows_comat.multiply(mask)
-    #assert comat_data.shape == (batch_size, vocab_size+1)
-    #print(f"comat_data.data.size: {comat_data.data.size}, expected: {batch_size*window_size*2}")
-    #assert comat_data.data.size == batch_size*window_size*2
-    #comat_data_kari = np.ones(shape=(batch_size, window_size*2), dtype=np.uint8)
-    #せめてアダマール積が重いかどうかだけ判断
-    batch['comat_data'] = torch.from_numpy(comat_data_kari)
-    #batch['comat_data'] = torch.from_numpy(np.reshape(comat_data.data, [batch_size, window_size*2]))
-    del rows_comat, rows_mask, comat_data
-    return batch
+    emb_dim = int(args[2])
+    epoch = int(args[3])
 
 
 class CBOWNet(nn.Module):
@@ -404,151 +246,47 @@ class CBOWNet(nn.Module):
         #10. 正例での誤差と負例での誤差を足し、最小化問題のためマイナス符号をつけ, バッチ方向で平均を取りスカラに変換、戻り値とする。
         return -(positive_loss + negative_loss).mean() #バッチ方向で平均
 
+pca = PCA(n_components=2)
+
+num_negative_samples = 5
 vocab_size = 100000
 batch_size = 32768
-overall_start_time = time.time()
-print("Loading cooccurrence matrix from disk to RAM...")
-#comat: sparse.csr_matrix = sparse.load_npz("./comat.window_5.vocab_400000.uint8.noweight.npz")
-comat: np.ndarray = np.load(f"./comat_dense.window_{window_size}.vocab_100000.float16.noweight.npy")
-comat = torch.from_numpy(comat)
-print("Transferring to VRAM...")
-print("skip")
-#comat = torch.tensor(comat).to(device)
-#comat = torch.tensor(comat)
-print("Loaded to VRAM")
-
-model = CBOWNet(vocab_size+1, emb_dim=emb_dim,)
-init_input_weights = _init_normalized()
-init_output_weights = _init_normalized()
-model.input_emb.weight.data = init_input_weights
-model.output_emb.weight.data = init_output_weights
-norms = torch.linalg.norm(model.input_emb.weight.data, dim=1)
-print(norms.mean().item(), norms.std().item())
-#model.load_state_dict(torch.load(f"./models/dim_{emb_dim}_{vocab_size}/model_CBOWCOM_AdamW_default_batch_{batch_size}_init_normalized_negs_5_epoch_1_118.pth"))
-model = model.to(device)
-optimizer = optim.AdamW(model.parameters(), lr=0.001, eps=1e-8)
-weights = torch.from_numpy(np.load("./wiki-cleaned.nostopword.100000.negdist.npy")).to(device, dtype=torch.float) #negative sampling weights
+model = CBOWNet(vocab_size+1, emb_dim=emb_dim)
 
 word_to_id, id_to_word = load_dict("/tf/paper/cbow-com/utils/wiki-cleaned.nostopword.100000.vocab")
-if word_to_id is None:
-    print("Vocabulary file can't be opened, Abort!")
-    sys.exit(1)
 
-#exponential_scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
-
-#optimizer = optim.SGD(model.parameters(), lr=0.025)
-
-# with tqdm(range(epoch)) as pbar_epoch:
-#     for e in pbar_epoch:
-#         loss = 0
-#         pbar_epoch.set_description("[Epoch %d]" % (e))
-#         with tqdm(enumerate(data_loader), total=len(data_loader)) as pbar_loss:
-#             for i, (data, labels) in pbar_loss:
-#                 data, labels = data.to(device), labels.to(device)
-#                 loss += model(data, labels)
-#                 loss.backward()
-#                 optimizer.step()
-
-dataset_path = glob.glob(f"/tf/paper/cbow-com/dataset/window_{window_size}/wiki-cleaned.*")
-dataset_path.sort()
-num_dataset_files = len(dataset_path)
-
-for epoch in tqdm(range(0, 5)):
-    epoch_start_time = time.time()
-    dataset_idx = 0
-    if dataset_idx == -1:
-        break
-    while dataset_idx+1 <= num_dataset_files:
-        loss_all = 0
-        dataset = np.load(dataset_path[dataset_idx])
-        data = dataset[:, 1:] #context
-        labels = dataset[:, 0] #centre
-        custom_dataset= CustomDataset(data, labels)
-        #custom_dataset.data = torch.from_numpy(custom_dataset.data).to(device)
-        #custom_dataset.labels = torch.from_numpy(custom_dataset.labels).to(device)
-        data_loader = DataLoader(
-            dataset=custom_dataset,
-            batch_size=batch_size,
-            shuffle=True,
-            num_workers=16,
-            collate_fn=collate_fn_dense,
-            pin_memory=True,
-            )
-        for batch in tqdm(data_loader):
-            context_ids = batch['data'].to(device, non_blocking=True, dtype=torch.long)
-            centre_ids = batch['labels'].to(device, non_blocking=True, dtype=torch.long)
-            comat_data = batch['comat_data'].to(device, non_blocking=True, dtype=torch.float32)
-            #共起行列から行を取り出しGPUに転送する処理
-            # centre_ids_numpy = centre_ids.numpy()
-            # comat_data = comat[centre_ids_numpy]
-            # comat_data = comat_data.tocoo()
-            # indices = torch.from_numpy(np.vstack((comat_data.row, comat_data.col))).long()
-            # values = torch.from_numpy(comat_data.data)
-            # shape = torch.Size(comat_data.shape)
-            # comat_data = torch.sparse_coo_tensor(indices, values, shape).to(device, non_blocking=True)
-            #終了
-
-            #centre_idsは共起行列作成のためにメモリに保留していたが処理が完了したのでGPUに転送する
-            neg_size = centre_ids.shape[0]
-            neg_ids = torch.multinomial(weights, neg_size * num_negative_samples, replacement=True)
-            neg_ids = neg_ids.view(neg_size, num_negative_samples) # shape: (batch_size, num_negative_samples)
-
-            optimizer.zero_grad()
-            loss = model(context_ids, centre_ids, neg_ids, comat_data)
-            loss.backward()
-            optimizer.step()
-            loss_all += loss.item()
-        norms = torch.linalg.norm(model.input_emb.weight.data, dim=1)
-        print(f"loss:{loss_all}, avg_norm: {norms.mean().item()}, std: {norms.std().item()}")
-        print(f"WS353: {eval_benchmark('ws353')}, SimLex-999: {eval_benchmark('simlex999')}")
-        dataset_idx += 1
-        #if dataset_idx % 25 == 0:
-        #    torch.save(model.state_dict(), f"./models/dim_{emb_dim}_{vocab_size}/model_CBOWCOM_log_AdamW_default_negs_{num_negative_samples}_epoch_{epoch}_{dataset_idx}.pth")
-    #torch.save(model.state_dict(), f"./models/dim_{emb_dim}/window_{window_size}/model_CBOWCOM_AdamW_default_batch_size_{batch_size}_init_normalized_negs_{num_negative_samples}_epoch_{epoch}.pth")
-    #torch.save(model.state_dict(), f"./models/CBOW_COM/dim_{emb_dim}/window_{window_size}/seed_{seed}/epoch_{epoch}.pth")
-    epoch_end_time = time.time()
-    # with open("./experiment_duration_log.txt", 'a') as duration_log:
-    #     duration_log.write(f"CBOW-COM {window_size} {num_negative_samples} {emb_dim} {epoch}: {epoch_end_time - epoch_start_time}\n")
-    # print(f"epoch {epoch}: {epoch_end_time - epoch_start_time}[s]")
-    with open("./experiment_duration.txt", 'a') as duration_log:
-        duration_log.write(f"CBOW-COM {window_size} {emb_dim} {epoch} : {epoch_end_time - epoch_start_time}")
-    
-torch.save(model.state_dict(), f"./models/CBOW_COM/dim_{emb_dim}/window_{window_size}/seed_{seed}.pth")
-
-    
-# for epoch in range(5):
-#     loss = 0
-#     model.train()
-#     optimizer.zero_grad()
-
-
-#     for batch in data_loader:
-#         loss += model(batch['data'], batch['labels'])
-
-#     for i in range(len(contexts)):
-#         #一気にコーパスをロードするとバッファオーバーフローを引き起こす可能性がある
-#         #そこで、一度にロードするコーパス量を制限する。単語IDがint32であるとすると、1億トークンであれば学習用のデータをコンテキストワードとセンターワードで
-#         #4.4GB程度になると概算. パイプライン化などしてオーバーヘッドを減らせるか？
-
-#         loss += model(contexts[i], target[i])
-    
-#     loss.backward()
-#     print("epoch :" + str(epoch))
-#     print("whole_loss: " + str(loss))
-#     print("--------")
-#     optimizer.step()
-
+model.load_state_dict(torch.load(f"/tf/paper/cbow-com/models/dim_{emb_dim}/window_{window_size}/model_CBOW_AdamW_default_batch_32768_init_normalized_negs_{num_negative_samples}_epoch_{epoch}.pth"))
+#model.to(device)
 model.eval()
 with torch.no_grad():
-    #tokyo - japan + germany = ? (ans. berlin)
-    pred = model.input_emb.weight[1769] - model.input_emb.weight[463] + model.input_emb.weight[1213]
-    ans = model.input_emb.weight[479]
 
-    print("predicted berlin :"); print(pred)
-    print("True      berlin :"); print(ans)
-    print("cos similarity: "); print(cos_similarity(pred, ans))
-    print("announcement , news"); print(cos_similarity(model.input_emb.weight[5178], model.input_emb.weight[583]))
-    print("cup, coffee"); print(cos_similarity(model.input_emb.weight[193], model.input_emb.weight[4395]))
-    print("japan, japanese"); print(cos_similarity(model.input_emb.weight[463], model.input_emb.weight[542]))
-    print(model.input_emb.weight)
-    print(model.output_emb.weight)
+    pca.fit(model.input_emb.weight)
+
+    data_pca= pca.transform(model.input_emb.weight)
+
+    fig=plt.figure(figsize=(20,12),facecolor='w')
+
+    plt.xlim(-6, 6)
+    plt.ylim(-6, 6)
+
+    # # 3Dを指定
+    # ax = fig.add_subplot(111, projection="3d")
+
+    # # 各軸の設定
+    # ax.set_xlabel("x", size=10)
+    # ax.set_ylabel("y", size=10)
+    # ax.set_zlabel("z", size=10)
+
+    plt.rcParams["font.size"] = 10
+    i = 0
+    while i < vocab_size:
+        #点プロット
+        plt.plot(data_pca[i][0], data_pca[i][1], ms=5.0, zorder=2, marker="x")
+    
+        #文字プロット
+        #plt.annotate(id_to_word[i+1], (data_pca[i][0], data_pca[i][1]), size=12)
+    
+        i += 1
+
+    plt.savefig("./hoge_2d.pdf")
+    plt.show()

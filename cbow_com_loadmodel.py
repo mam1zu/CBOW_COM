@@ -8,12 +8,13 @@ from torch.utils.data import DataLoader
 import numpy as np
 import time
 from tqdm import tqdm
-from utils import cos_similarity, load_dict, most_similar
+from utils import cos_similarity, load_dict, most_similar, check_anisotropy
 from CustomLoader import CustomDataset
 from operator import itemgetter
 import pandas as pd
 from scipy.stats import spearmanr, rankdata
 from ws353benchmark import get_dataframe
+from analogybenchmark import get_benchmark_dataset, get_file_list
 device = 'cpu'
 args = sys.argv
 SIMILAR_MODE = 'positive'
@@ -21,12 +22,82 @@ similar_mode_list = ['positive', 'negative']
 CALC_MODE = 'sim'
 calc_mode_list = ['sim', 'calc']
 SCOPE = 5
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 word_to_id, id_to_word = load_dict("/tf/paper/cbow-com/utils/wiki-cleaned.nostopword.100000.vocab")
 
 if word_to_id is None:
     print("Vocabulary file can't be opened, Abort!")
     sys.exit(1)
+
+window_size = None
+emb_dim = None
+epoch = None
+verbose = 1
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+word_to_id, id_to_word = load_dict("/tf/paper/cbow-com/utils/wiki-cleaned.nostopword.100000.vocab")
+
+if word_to_id is None:
+    print("Vocabulary file can't be opened, Abort!")
+    sys.exit(1)
+
+if len(args) != 4:
+    print("num of parameters doesn't match, abort!")
+    print(f"example: python3 {args[0]} [window_size] [emb_dim] [epoch]")
+    sys.exit(1)
+else:
+    window_size = int(args[1])
+    emb_dim = int(args[2])
+    epoch = int(args[3])
+print(f"window_size: {window_size}")
+print(f"emb_dim: {emb_dim}")
+print(f"epoch: {epoch}")
+
+def eval_analogy_benchmark():
+    benchmark_datasets = get_benchmark_dataset()
+    acc_list = []
+    counter = 0
+    semantic_len = 0
+    semantic_acc_count = 0
+    syntactic_len = 0
+    syntactic_acc_count = 0
+    
+    file_list = get_file_list()
+
+    for i, dataset in enumerate(benchmark_datasets):
+        data_count = len(dataset)
+        acc_count = 0
+        for data in dataset:
+            ex_words = torch.tensor([data[0], data[1], data[3]], dtype=torch.int32).to(device)
+            predict_vector = model.input_emb(torch.tensor(data[0]).to(device)) - model.input_emb(torch.tensor(data[1]).to(device)) + model.input_emb(torch.tensor(data[3]).to(device))
+            predict_vector = predict_vector.to(device)
+            res = most_similar(model, vocab_size, predict_vector, scope=1, ex_words=ex_words)
+            judge = data[2] == res[0][0]
+            judge_symbol = "O" if judge else "X"
+            if verbose > 1:
+                print(f"[{counter+1:05d}:{judge_symbol}]ans: {id_to_word[data[2]]}, pred: {id_to_word[res[0][0]]}, confidence: {res[0][1]}")
+            if judge:
+                acc_count += 1
+            counter += 1
+        print(f"Accuracy: {acc_count / data_count}")
+        acc_list.append(acc_count/data_count)
+        if "gram" in file_list[i]:
+            print(f"{file_list[i]}: SYNTACTIC")
+            syntactic_len += data_count
+            syntactic_acc_count += acc_count
+        else:
+            print(f"{file_list[i]}: SEMANTIC")
+            semantic_len += data_count
+            semantic_acc_count += acc_count
+    
+    print("Word Analogy Benchmark Result")
+    for i, acc in enumerate(acc_list):
+        print(f"{file_list[i]}. {acc}")
+
+    print(f"Semantic accuracy: {semantic_acc_count/semantic_len}, {semantic_acc_count} / {semantic_len}")
+    print(f"Syntactic accuracy: {syntactic_acc_count/syntactic_len}, {syntactic_acc_count} / {syntactic_len}")
+    print(f"Overall accuracy: {(semantic_acc_count+syntactic_acc_count) / (semantic_len + syntactic_len)}")
 
 def eval_benchmark(benchmark_type: str):
     df = get_dataframe(benchmark_type)
@@ -49,8 +120,8 @@ def eval_benchmark(benchmark_type: str):
         if word1 is None:
             break
         try:
-            word1_vector = model.input_emb(torch.tensor(word_to_id[word1]))
-            word2_vector = model.input_emb(torch.tensor(word_to_id[word2]))
+            word1_vector = model.input_emb(torch.tensor(word_to_id[word1]).to(device))
+            word2_vector = model.input_emb(torch.tensor(word_to_id[word2]).to(device))
             cos_sim.append(cos_similarity(word1_vector, word2_vector).item())
             human_value_list.append(human_value)
         except KeyError:
@@ -58,10 +129,6 @@ def eval_benchmark(benchmark_type: str):
     
     #cos_sim = rankdata(cos_sim)
     #human_value_list = rankdata(human_value_list)
-
-    if benchmark_type == 'men':
-        print(cos_sim)
-        print(human_value_list)
 
     spearman_correlation, _ = spearmanr(cos_sim, human_value_list)
     return spearman_correlation
@@ -74,12 +141,12 @@ def calcmode_sim(model, input, vocab_size) -> None:
         return
     try:
         input_word_id = word_to_id[input]
-        input_word_id = torch.tensor(input_word_id, dtype=torch.int32)
+        input_word_id = torch.tensor(input_word_id, dtype=torch.int32).to(device)
     except KeyError:
         print(f"word {input} is not in the dict !")
         return
     input_word_emb = model.input_emb(input_word_id)
-    similar_words = most_similar(model, vocab_size, input_word_emb, scope=SCOPE, mode=SIMILAR_MODE)
+    similar_words = most_similar(model, vocab_size, input_word_emb, scope=SCOPE, mode=SIMILAR_MODE, ex_words=input_word_id)
     for word in similar_words:
         print(f"{id_to_word[word[0]]} : {word[1]}")
     
@@ -275,14 +342,19 @@ class CBOWNet(nn.Module):
         return -(positive_loss + negative_loss).mean() #バッチ方向で平均
     
 
-emb_dim = 300
 vocab_size = 100000
+num_negative_samples = 5
+batch_size=32768
 model = CBOWNet(vocab_size+1, emb_dim=emb_dim)
-
-model.load_state_dict(torch.load("/tf/paper/cbow-com/models/dim_300_100000/model_CBOWCOM_log_AdamW_default_negs_5_epoch_4_117.pth"))
+model.to(device)
+model.load_state_dict(torch.load(f"/tf/paper/cbow-com/models/dim_{emb_dim}/window_{window_size}/model_CBOWCOM_AdamW_default_batch_size_32768_init_normalized_negs_5_epoch_{epoch}.pth"))
 
 model.eval()
 with torch.no_grad():
+
+    print(check_anisotropy(model, vocab_size, size=10000))
+    eval_analogy_benchmark()
+
 
     pred_paris = model.input_emb.weight[1769] - model.input_emb.weight[463] + model.input_emb.weight[362]
     ans_paris = model.input_emb.weight[608]
@@ -302,7 +374,6 @@ with torch.no_grad():
     said_minus_say = model.input_emb.weight[276] - model.input_emb.weight[1970] #said - say  = called - call となったりしないか？
     called_minus_call = model.input_emb.weight[175] - model.input_emb.weight[1197] 
     print("cos similarity of pred and ans past :"); print(cos_similarity(said_minus_say, called_minus_call)) # コサイン類似度が近いのでおそらくsaid_minus_sayは動詞を過去形にするベクトル？
-
     ws353_spearman_correlation = eval_benchmark('ws353')
     print(f"WS353 Spearman correlation: {ws353_spearman_correlation}")
 
@@ -317,7 +388,6 @@ with torch.no_grad():
 
     ws353s_spearman_correlation = eval_benchmark('ws353s')
     print(f"WS353 Similarity Spearman correlation: {ws353s_spearman_correlation}")
-
     while True:
         if CALC_MODE == 'sim':
             print("input word to find most similar words.")

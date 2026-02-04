@@ -8,9 +8,9 @@
 #define VOCAB_SIZE 100000
 #define EMB_DIM 300
 #define WINDOW_SIZE 10
-#define CORPUS_FILE_PATH "./wiki-cleaned.nostopword.100000.txt"
-#define TARGET_DIRECTORY_PATH "../dataset/window_10/"
-#define VCB_FILE_PATH "./wiki-cleaned.nostopword.100000.vocab"
+#define CORPUS_FILE_PATH "/tf/paper/cbow-com/utils/wiki-cleaned.nostopword.100000.txt"
+#define TARGET_DIRECTORY_PATH "/tf/paper/cbow-com/dataset/window_10/"
+#define VCB_FILE_PATH "/tf/paper/cbow-com/utils/wiki-cleaned.nostopword.100000.vocab"
 
 HASHREC *hashsearch(HASHREC **ht, char *w) {
 	HASHREC *htmp, *hprv;
@@ -212,12 +212,11 @@ int main(void) {
 	unsigned int file_counter = 0;
 	HASHREC **vocab_hash = inithashtable(), *htmp, *hprv;
 	char ch[MAX_STRING_LENGTH];
-	sprintf(file_head, "wiki-cleaned.nostopword.%d.train", VOCAB_SIZE);
+	sprintf(file_head, "wiki-cleaned.nostopword.traindata", VOCAB_SIZE);
 
 	int *history = (int *)calloc(window_size*2+1, sizeof(int));
-	int *history_left = (int *)calloc(window_size, sizeof(int));
-	int *history_right = (int *)calloc(window_size, sizeof(int));
-
+	// int *history_left = (int *)calloc(window_size, sizeof(int));
+	// int *history_right = (int *)calloc(window_size, sizeof(int));
 
 	if((vcb_fp = fopen(VCB_FILE_PATH, "r")) == NULL) {
 		fprintf(stderr, "Vocabulary File %s not found.\n", VCB_FILE_PATH);
@@ -236,6 +235,7 @@ int main(void) {
 	fprintf(stderr, "Hash table generated.\n");
 
 	counter = 0;
+	int article_counter = 0;
 	sprintf(filename, "%s%s.%04d", TARGET_DIRECTORY_PATH, file_head, file_counter);
 	if(DEBUG) fprintf(stderr, "filename: %s\n", filename);
 	fid = fopen(filename, "wb");
@@ -255,15 +255,15 @@ int main(void) {
 	if(DEBUG) fprintf(stderr, "DEBUG COUNTER: %d\n", debug_counter++);
 
 	//まず右側ウィンドウを読み込む
-	for(k = 0; k < window_size; k++) {
-		flag = get_word(ch, src_fp);
-		if(flag == 1) break;
-		htmp = hashsearch(vocab_hash, ch);
-		if(htmp != NULL) {
-			history[history_idx % (window_size * 2 + 1)] = htmp->num;
-			history_idx++;
-		}
-	}
+	// for(k = 0; k < window_size; k++) {
+	// 	flag = get_word(ch, src_fp);
+	// 	if(flag == 1) break;
+	// 	htmp = hashsearch(vocab_hash, ch);
+	// 	if(htmp != NULL) {
+	// 		history[history_idx % (window_size * 2 + 1)] = htmp->num;
+	// 		history_idx++;
+	// 	}
+	// }
 
 	while(1) {
 		flag = get_word(ch, src_fp);
@@ -271,6 +271,7 @@ int main(void) {
 			if(feof(src_fp)) break;
 			memset(history, 0, sizeof(int) * (window_size * 2 + 1));
 			history_idx = 0;
+			article_counter++;
 			continue;
 		}
 
@@ -278,9 +279,11 @@ int main(void) {
 		if(htmp == NULL) continue;
 		history[history_idx % (window_size * 2 + 1)] = htmp->num;
 		history_idx++;
-		if(check_contains_zero(history, window_size*2+1)) {
+		if(history_idx <= (window_size*2 + 1))
 			continue;
-		}
+		// if(check_contains_zero(history, window_size*2+1)) {
+		// 	continue;
+		// }
 
 		//history_idx-1 - window_size: 中心単語のインデックス
 		// window_size*2+1を足すのは, 負の剰余演算で未定義動作が発生するのを防ぐため
@@ -300,22 +303,23 @@ int main(void) {
 
 		counter++;
 		j++;
-		if((counter % 100000) == 0) fprintf(stderr, "\r\033[0KProcessed %lld token.", counter);
-		if((counter % 16777216) == 0) {
-			//学習データは16777216(=2^24)個ごとにファイル分割を行いたい
-			shape[0] = 16777216;
-			fseek(fid, 0, SEEK_SET);
-			write_npy_header(fid, dtype, shape, dim);
-			fflush(fid);
-			fclose(fid);
-			file_counter++;
-			sprintf(filename, "%s%s.%04d", TARGET_DIRECTORY_PATH, file_head, file_counter);
-			fid = fopen(filename, "wb");
-			write_header_reserve(fid, 128);
-		}
-	}
+		if((counter % 100000) == 0) fprintf(stderr, "\r\033[0KProcessed %lld token, article:%d", counter, article_counter);
 
-	shape[0] = counter % 16777216;
+		// if((counter % 16777216) == 0) {
+		// 	//学習データは16777216(=2^24)個ごとにファイル分割を行いたい
+		// 	shape[0] = 16777216;
+		// 	fseek(fid, 0, SEEK_SET);
+		// 	write_npy_header(fid, dtype, shape, dim);
+		// 	fflush(fid);
+		// 	fclose(fid);
+		// 	file_counter++;
+		// 	sprintf(filename, "%s%s.%04d", TARGET_DIRECTORY_PATH, file_head, file_counter);
+		// 	fid = fopen(filename, "wb");
+		// 	write_header_reserve(fid, 128);
+		// }
+	}
+	fprintf(stderr, "\r\033[0KProcessed %lld token, article:%d\n", counter, article_counter);
+	shape[0] = counter;
 	fseek(fid, 0, SEEK_SET);
 	write_npy_header(fid, dtype, shape, dim);
 	fflush(fid);
@@ -324,4 +328,14 @@ int main(void) {
 	fclose(vcb_fp);
 	free_table(vocab_hash);
 	free(history);
+
+	// shape[0] = counter % 16777216;
+	// fseek(fid, 0, SEEK_SET);
+	// write_npy_header(fid, dtype, shape, dim);
+	// fflush(fid);
+	// fclose(fid);
+
+	// fclose(vcb_fp);
+	// free_table(vocab_hash);
+	// free(history);
 }

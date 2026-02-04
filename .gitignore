@@ -10,3 +10,8 @@ benchmark
 comat_dense*
 ./utils/wiki-cleaned*
 .ipynb_checkpoints
+*.ipynb
+*.sh
+*.swp
+*.pdf
+*.txt

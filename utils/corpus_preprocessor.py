@@ -5,13 +5,32 @@ import numpy as np
 from _stop_words import ENGLISH_STOP_WORDS
 
 VOCAB_SIZE = 100000
-SRC_FILE_PATH = f"../../wikidata/wiki-cleaned.txt" #wiki-cleaned
+SRC_FILE_PATH = f"../wiki-cleaned.txt" #wiki-cleaned
 VCB_FILE_PATH = f"./wiki-cleaned.nostopword.100000.vocab" #wiki-cleaned.
 VCBC_FILE_PATH = f"./wiki-cleaned.nostopword.100000.vocabc"
 DST_FILE_PATH = f"./wiki-cleaned.nostopword.{VOCAB_SIZE}.txt" #wiki-cleaned.nostopword.[VOCAB_SIZE].txt
 
 vocab_dict = {}
 vocab_array = []
+benchmark_vocab = [
+        "uninformative",
+        "chisinau", 
+        "shuffles", 
+        "luckiest",
+        "tastiest",
+        "weirdest",
+        "kwanza",
+        "forint",
+        "lats",
+        "litas",
+        "denar",
+        "ringgit",
+        "zloty",
+        "hryvnia",
+        "orthodontist",
+        "disorganize",
+        "suds",
+]
 
 src_file = None
 vcb_file = None
@@ -69,7 +88,7 @@ def get_word():
             yield word
         yield ""
 
-def vocab_count() -> None:
+def vocab_count() -> dict:
     counter = 0
     ch_generator = get_word()
     while True:
@@ -102,11 +121,12 @@ def vocab_count() -> None:
     print(f"processed {counter} tokens")
     
     #dict -> array
-    for word, count in vocab_dict.items():
-        vocab_array.append([word, count])
+    #for word, count in vocab_dict.items():
+    #    vocab_array.append([word, count])
 
-    vocab_array.sort(key=lambda x: (-x[1], x[0]))
-    return vocab_array
+    #vocab_array.sort(key=lambda x: (-x[1], x[0]))
+    #return vocab_array
+    return vocab_dict
 
 def write_vocab_files(vocab_array) -> None:
 
@@ -163,15 +183,41 @@ def main():
     print("Corpus Preprocessor")
 
     print("Phase 1: Counting vocabulary")
-    if vcb_file_exists and vcbc_file_exists:
+    if False and vcb_file_exists and vcbc_file_exists:
         print("Vocabulary file detected, loading...")
         vocab_array = load_vocabc_file()
     else:
-        vocab_array = vocab_count() #array of [word, count]
-        vocab_array = vocab_array[:VOCAB_SIZE] #Cut vocabulary
-        vocab_array[VOCAB_SIZE-3] = ['suds', 736] #For MEN
-        vocab_array[VOCAB_SIZE-2] = ['orthodontist', 570] #For MEN
-        vocab_array[VOCAB_SIZE-1] = ['disorganize', 62] #For SimLex-999
+        #get vocab count dict
+        vocab_dict = vocab_count()
+
+        #make used-in-benchmark but not included the frequent words of VOCAB_SIZE vocab list
+        tmp_list = []
+        for word in benchmark_vocab:
+            tmp_list.append([word, vocab_dict[word]])
+        tmp_list.sort(key=lambda x: (-x[1], x[0]))
+        
+        #vocab dict -> list
+        vocab_array = []
+        for word, count in vocab_dict.items():
+            vocab_array.append([word, count])
+        del vocab_dict
+        vocab_array.sort(key=lambda x: (-x[1], x[0]))
+        vocab_array = vocab_array[:VOCAB_SIZE] #cut vocabulary
+
+        #vocab_array = vocab_count() #array of [word, count]
+        #benchmark_dict = {}
+        #for word in benchmark_vocab:
+        #    print(vocab_array[word])
+        #    benchmark_dict[word] = vocab_array[word]
+        #benchmark_dict.sort(key=lambda x: (-x[1], x[0]))
+        #vocab_array = vocab_array[:VOCAB_SIZE] #Cut vocabulary
+        
+        for index, element in enumerate(tmp_list):
+            vocab_array[VOCAB_SIZE-len(tmp_list)+index] = element
+        
+        #vocab_array[VOCAB_SIZE-3] = ['suds', 736] #For MEN
+        #vocab_array[VOCAB_SIZE-2] = ['orthodontist', 570] #For MEN
+        #vocab_array[VOCAB_SIZE-1] = ['disorganize', 62] #For SimLex-999
         write_vocab_files(vocab_array)
         print("Phase 1: Counting finished and saved.")
     
